@@ -80,7 +80,7 @@ cd tmc-cloud
 chmod +x scripts/setup/*.sh scripts/deployment/*.sh scripts/maintenance/*.sh scripts/utils/*.sh
 
 # Run initial setup
-./scripts/setup/setup-environment.sh
+./scripts/setup/setup-environment.sh # (Prepares each node, now includes UFW, Fail2ban, auto-updates, and hostname guidance)
 ```
 
 ### 2. Network Configuration
@@ -94,11 +94,24 @@ chmod +x scripts/setup/*.sh scripts/deployment/*.sh scripts/maintenance/*.sh scr
 
 ```bash
 # On master node
-./scripts/setup/setup-master.sh
+./scripts/setup/setup-master.sh # (Initializes K8s master, now applies default network policies)
 
 # On worker nodes
-./scripts/setup/setup-worker.sh
+./scripts/setup/setup-worker.sh # (Joins worker to cluster, now with enhanced security guidance)
 ```
+
+## Multi-Node Deployment Notes
+
+Deploying this system across multiple laptops (nodes) requires careful attention to a few key areas:
+
+-   **Unique Hostnames:** Crucial for a multi-node Kubernetes cluster, each laptop/node *must* have a unique hostname. The `scripts/setup/setup-environment.sh` script will warn you if a generic hostname (like "ubuntu" or "localhost") is detected and provide instructions to change it (e.g., using `sudo hostnamectl set-hostname my-master`). Remember to update `/etc/hosts` accordingly and reboot if you change the hostname.
+
+-   **Script Execution Order:**
+    1.  Run `scripts/setup/setup-environment.sh` on *all* laptops that will be part of the cluster. This script prepares the common base environment.
+    2.  Run `scripts/setup/setup-master.sh` on the *one* laptop designated as the Kubernetes master node.
+    3.  Run `scripts/setup/setup-worker.sh` on *each* of the laptops designated as worker nodes. You will need the join command output by `setup-master.sh`.
+
+-   **Configuration & IP Addresses:** The setup scripts, particularly `setup-master.sh`, contain some hardcoded IP addresses (e.g., `192.168.1.100` for the master node's API server). If your network configuration or chosen master IP differs, you'll need to adjust these values within the scripts themselves. Look for comments within the scripts for guidance on where these are set. For more advanced setups, consider parameterizing these values using environment variables or a separate configuration file. The `network-config.yaml` template created by `setup-environment.sh` should also be reviewed and aligned with your network plan.
 
 ### 4. Deploy Core Services
 
@@ -256,6 +269,32 @@ pre-commit run --all-files
 - **Backup Encryption**: Encrypted offsite backups
 - **Certificate Management**: cert-manager for automatic SSL certificates
 - **GitHub Secrets**: Secure storage of CI/CD secrets and tokens
+
+### Enhanced Security Measures
+
+The setup scripts incorporate several security best practices by default:
+
+-   **Firewall (UFW):** The `setup-environment.sh` script configures UFW (Uncomplicated Firewall) on each node. It establishes a default policy of denying all incoming traffic and allowing all outgoing traffic. Specific rules are added to allow essential services, including:
+    -   SSH (port 22/tcp)
+    -   Kubernetes components: API server (6443/tcp), etcd (2379-2380/tcp), Kubelet (10250/tcp), NodePort services (30000-32767/tcp).
+    -   CNI communication (Calico): BGP (179/tcp), IP-in-IP (protocol `ipip`).
+    -   HTTP/S traffic (ports 80/tcp, 443/tcp).
+
+-   **Intrusion Prevention (Fail2ban):** `Fail2ban` is installed and configured by `setup-environment.sh`. It actively monitors SSH logs and temporarily bans IP addresses that exhibit malicious behavior, such as excessive incorrect password attempts, thereby mitigating brute-force attack risks.
+
+-   **Automatic Security Updates:** The `unattended-upgrades` package is configured via `setup-environment.sh` to automatically download and install security patches daily. This helps protect the system against known vulnerabilities with minimal manual intervention. To prevent unintended disruptions to the Kubernetes cluster, packages like `kubeadm`, `kubelet`, and `kubectl` are blacklisted from automatic upgrades.
+
+-   **SSH Hardening Guidance:** While the scripts set up basic SSH access and Fail2ban, users are strongly encouraged to manually enhance SSH security further:
+    *   **Disable password authentication:** Enforce key-based authentication for stronger protection against password guessing.
+    *   **Disable direct root login:** Prevent root users from logging in directly via SSH.
+    *   These changes can be made by editing `/etc/ssh/sshd_config` and restarting the `sshd` service (e.g., `sudo systemctl restart sshd`). The `setup-environment.sh` script provides a reminder for these manual steps.
+
+-   **Kubernetes Network Policies:** The `setup-master.sh` script now applies default network policies to the `default` namespace using Calico CNI. These policies institute a "default deny" for all ingress and egress traffic for pods in that namespace. Specific rules are then added to:
+    *   Allow DNS resolution (to `kube-dns` pods in `kube-system`).
+    *   Allow basic internet egress from pods.
+    *   **Important:** Users *must* create explicit `NetworkPolicy` resources to allow any other required communication between their application pods or to/from external services. Guidance is also provided to consider similar policies for other namespaces like `kube-system`, applied cautiously.
+
+-   **Secure Token Handling:** The `kubeadm join` token, generated on the master node and used to add worker nodes, is critical for cluster security. The `setup-master.sh` and `setup-worker.sh` scripts now include explicit warnings to handle this token securely during its transfer and use, as it grants significant privileges.
 
 ## Services & Components
 
