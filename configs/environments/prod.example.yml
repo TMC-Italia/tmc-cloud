@@ -1,0 +1,77 @@
+# Example Production Environment Configuration
+# configs/environments/prod.example.yml
+
+environment_name: "production"
+debug_mode: false
+log_level: "INFO" # More concise logging for production
+
+database:
+  host: "prod_db_host_or_cluster_endpoint" # Should be a robust, scalable DB instance
+  port: 5432
+  username: "prod_user" # Use a dedicated, least-privilege user
+  # Password should be managed via a secrets manager (e.g., HashiCorp Vault, AWS Secrets Manager)
+  # password: "LOAD_FROM_SECRETS_MANAGER"
+  name: "prod_db"
+  ssl_mode: "require" # Enforce SSL for database connections
+
+api_keys:
+  # API keys should also be managed via a secrets manager
+  # service_a: "LOAD_FROM_SECRETS_MANAGER_SERVICE_A"
+  # service_b: "LOAD_FROM_SECRETS_MANAGER_SERVICE_B"
+  service_a: "prod_api_key_placeholder_service_a"
+  service_b: "prod_api_key_placeholder_service_b"
+
+
+feature_flags:
+  new_dashboard: true
+  experimental_feature_x: false # Typically false in production unless rolling out
+
+email:
+  host: "smtp.production_email_provider.com" # e.g., smtp.sendgrid.net, email-smtp.us-east-1.amazonaws.com
+  port: 587 # Or 465 for SSL
+  username: "prod_email_username" # Often an API key or specific username
+  # password: "LOAD_FROM_SECRETS_MANAGER_EMAIL_PASSWORD"
+  tls: true # Use TLS/SSL
+  from_address: "noreply@yourdomain.com"
+
+# Settings for external services (use live URLs for prod)
+payment_gateway:
+  url: "https://api.paymentprovider.com/api" # Live API endpoint
+  # api_key: "LOAD_FROM_SECRETS_MANAGER_PAYMENT_API_KEY"
+  api_key: "pk_live_your_prod_key_placeholder"
+
+object_storage:
+  provider: "aws_s3" # or "gcs", "azure_blob"
+  # endpoint: (often not needed if using official SDKs and correct region)
+  # access_key: (should be managed via IAM roles or instance profiles if on cloud VMs)
+  # secret_key: (should be managed via IAM roles or instance profiles if on cloud VMs)
+  bucket_name: "your-production-bucket-name"
+  region: "your-cloud-region" # e.g., us-west-2
+  use_ssl: true
+  create_bucket_if_not_exists: false # Production buckets should be pre-provisioned and configured
+
+# Consider adding settings for:
+# - Monitoring (e.g., Sentry DSN, Datadog API Key)
+# - Caching (e.g., Redis connection strings)
+# - CDN configuration
+# - Security headers
+# - Rate limiting
+# - Allowed hosts/origins (CORS)
+security:
+  allowed_hosts:
+    - "yourdomain.com"
+    - "www.yourdomain.com"
+  enable_csp: true # Content Security Policy
+  enable_hsts: true # HTTP Strict Transport Security
+  hsts_max_age: 31536000 # 1 year
+  hsts_include_subdomains: true
+  hsts_preload: true
+
+monitoring:
+  sentry_dsn: "https://your_sentry_dsn@o00000.ingest.sentry.io/000000"
+  datadog_api_key: "your_datadog_api_key_placeholder" # LOAD_FROM_SECRETS_MANAGER
+
+# IMPORTANT:
+# 1. Do NOT commit real secrets into this file. Use a secrets management system.
+# 2. This is an example; tailor it to your specific application needs.
+# 3. Regularly review and update your production configuration.

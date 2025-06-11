@@ -76,53 +76,54 @@ git clone https://github.com/TMC-Italia/tmc-cloud
 cd tmc-cloud
 
 # Make scripts executable
-chmod +x scripts/*.sh scripts/maintenance/*.sh
+# Adjust paths according to the new structure in scripts/
+chmod +x scripts/setup/*.sh scripts/deployment/*.sh scripts/maintenance/*.sh scripts/utils/*.sh
 
 # Run initial setup
-./scripts/setup-environment.sh
+./scripts/setup/setup-environment.sh
 ```
 
 ### 2. Network Configuration
 
 ```bash
 # Configure network on each node
-./scripts/configure-network.sh
+./scripts/setup/configure-network.sh
 ```
 
 ### 3. Kubernetes Cluster Setup
 
 ```bash
 # On master node
-./scripts/setup-master.sh
+./scripts/setup/setup-master.sh
 
 # On worker nodes
-./scripts/setup-worker.sh
+./scripts/setup/setup-worker.sh
 ```
 
 ### 4. Deploy Core Services
 
 ```bash
 # Deploy monitoring stack
-./scripts/deploy-monitoring.sh
+./scripts/deployment/deploy-monitoring.sh
 
 # Setup backup system
-./scripts/setup-backup.sh
+./scripts/setup/setup-backup.sh
 
 # Setup GitHub Actions runner
-./scripts/setup-github-runner.sh
+./scripts/setup-github-runner.sh # Note: This script was not part of the recent reorganization tasks. Its location and content should be verified.
 ```
 
 ### 5. Configure Remote Access
 
 ```bash
 # Configure Tailscale for secure VPN access
-./scripts/setup-tailscale.sh
+./scripts/setup/setup-tailscale.sh
 
 # Configure Cloudflare for public access
-./scripts/setup-cloudflare.sh yourdomain.com
+./scripts/setup/setup-cloudflare.sh yourdomain.com
 
 # Or run without domain (manual DNS setup)
-./scripts/setup-cloudflare.sh
+./scripts/setup/setup-cloudflare.sh
 ```
 
 ### 6. Maintenance & Health Checks
@@ -130,6 +131,86 @@ chmod +x scripts/*.sh scripts/maintenance/*.sh
 ```bash
 # Run system health check
 ./scripts/maintenance/system-health-check.sh
+```
+
+## Repository Structure
+
+The repository is organized into several key directories to maintain clarity and separation of concerns:
+
+-   **`configs/`**: Contains configuration files.
+    -   `configs/environments/`: Holds environment-specific configurations like `dev.example.yml` and `prod.example.yml`.
+-   **`docker/`**: Contains Docker-related files.
+    -   `docker/images/`: Houses Dockerfiles and related scripts (e.g., `entrypoint.sh`) for building container images, organized by image name.
+    -   `docker-compose.yml`: The main Docker Compose file for local development and service orchestration.
+-   **`kubernetes/`**: Contains Kubernetes manifest files.
+    -   `kubernetes/namespaces/`: YAML files defining Kubernetes namespaces.
+    -   `kubernetes/deployments/`: YAML files for application and service deployments. This includes actual deployment files like `github-runner-deployment.yaml` and `nextcloud-deployment.yaml`.
+    -   `kubernetes/configmaps/`: YAML files for ConfigMaps.
+    -   `kubernetes/services/`: YAML files defining Kubernetes services (Note: Directory to be populated).
+    -   `kubernetes/ingress/`: YAML files for Ingress controllers and rules (Note: Directory to be populated).
+    -   `kubernetes/storage/`: YAML files related to persistent storage, like PersistentVolumeClaims or StorageClass definitions, and placeholder files like `.gitkeep`.
+    -   `kubernetes/helm-charts/`: Contains Helm charts for deploying applications (currently holds a `.gitkeep`).
+-   **`scripts/`**: Contains shell scripts for various automation tasks.
+    -   `scripts/setup/`: Scripts related to initial setup and configuration of the environment and nodes (e.g., `setup-environment.sh`, `configure-network.sh`, `setup-master.sh`, `setup-backup.sh`).
+    -   `scripts/deployment/`: Scripts for deploying applications or services (e.g., `deploy-monitoring.sh`).
+    -   `scripts/maintenance/`: Scripts for system maintenance tasks (e.g., `system-health-check.sh`).
+    -   `scripts/utils/`: Utility scripts that might be used by other scripts (e.g., `common.sh`).
+
+## Example Files
+
+To help users get started and understand the configuration and scripting patterns, the following example files have been provided:
+
+-   **`configs/environments/dev.example.yml`**: An example configuration file tailored for a development environment. It includes settings like debug mode, local database connections, and mock service endpoints.
+-   **`configs/environments/prod.example.yml`**: An example configuration file for a production environment. It emphasizes security, robustness, and the use of production-level services and secrets management.
+-   **`scripts/deployment/deploy-app.example.sh`**: An example shell script outlining the steps for deploying an application. It covers typical deployment phases like pre-deployment checks, image updates, rollout status checks, and post-deployment tasks.
+-   **`scripts/setup/setup-backup.example.sh`**: An example shell script demonstrating how to set up and perform backups. It includes placeholders for database backups, application data backups, transfer to remote storage, and cleanup.
+
+These example files should be copied and modified according to your specific requirements. For instance, rename `dev.example.yml` to `dev.yml` and populate it with your actual development settings.
+
+## Pre-commit Checks
+
+This repository uses pre-commit hooks to ensure code quality and consistency before commits are made. This helps catch common issues early.
+
+### Setup
+
+To use the pre-commit hooks, you need to have `pre-commit` installed.
+
+1.  **Install pre-commit**:
+    If you don't have it installed, you can install it using pip:
+    ```bash
+    pip install pre-commit
+    ```
+
+2.  **Install the git hooks**:
+    Navigate to the root of the repository and run:
+    ```bash
+    pre-commit install
+    ```
+    This will set up the pre-commit script to run automatically before each commit.
+
+### Usage
+
+Once installed, pre-commit will run automatically when you `git commit`. It will check the staged files against the configured hooks (see `.pre-commit-config.yaml`).
+
+-   If any checks fail, the commit will be aborted. You'll see an error message indicating which hook failed and why.
+-   Fix the issues reported by the hooks (some hooks like `trailing-whitespace` or `end-of-file-fixer` might fix them automatically).
+-   After fixing, `git add` the modified files and try committing again.
+
+### Available Hooks
+
+The following hooks are configured:
+
+-   **YAML Linter (`yamllint`)**: Checks YAML files for syntax errors and style issues. Configuration can be customized in `.yamllint.yaml`.
+-   **Shell Script Linter (`shellcheck`)**: Performs static analysis on shell scripts to find potential bugs and improve style.
+-   **Trailing Whitespace**: Trims trailing whitespace from files.
+-   **End of File Fixer**: Ensures files end with a single newline.
+-   **Check YAML/JSON**: Basic syntax checks for YAML and JSON files.
+-   **Check Added Large Files**: Prevents accidental commits of large files.
+-   **Mixed Line Ending**: Ensures consistent line endings (LF).
+
+You can manually run all pre-commit hooks on all files at any time with:
+```bash
+pre-commit run --all-files
 ```
 
 ## Network Configuration

@@ -1,0 +1,46 @@
+# Example Development Environment Configuration
+# configs/environments/dev.example.yml
+
+environment_name: "development"
+debug_mode: true
+log_level: "DEBUG"
+
+database:
+  host: "localhost"
+  port: 5432
+  username: "dev_user"
+  password: "dev_password_unsafe" # Consider using environment variables or secrets management
+  name: "dev_db"
+
+api_keys:
+  service_a: "dev_api_key_for_service_a"
+  service_b: "dev_api_key_for_service_b"
+
+feature_flags:
+  new_dashboard: true
+  experimental_feature_x: false
+
+# Add other development-specific settings here
+# For example, mail server settings for development (e.g., MailHog)
+email:
+  host: "localhost"
+  port: 1025
+  username: ""
+  password: ""
+  tls: false
+  from_address: "noreply@example.dev"
+
+# Settings for external services (use mock or sandbox URLs for dev)
+payment_gateway:
+  url: "https://sandbox.paymentprovider.com/api"
+  api_key: "pk_test_your_dev_key"
+
+object_storage:
+  provider: "minio" # or local filesystem
+  endpoint: "http://localhost:9000"
+  access_key: "minioadmin"
+  secret_key: "minioadmin"
+  bucket_name: "dev-bucket"
+  region: "us-east-1" # MinIO default or local setup
+  use_ssl: false
+  create_bucket_if_not_exists: true
