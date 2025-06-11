@@ -1,0 +1,44 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+  
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+  
+    - name: Build and push Docker images
+      run: |
+        docker build -t ghcr.io/${{ github.repository }}/app:latest .
+        docker build -t ghcr.io/${{ github.repository }}/app:${{ github.sha }} .
+      
+        docker push ghcr.io/${{ github.repository }}/app:latest
+        docker push ghcr.io/${{ github.repository }}/app:${{ github.sha }}
+  
+    - name: Deploy to Kubernetes
+      run: |
+        echo "Deploying to Kubernetes cluster..."
+      
+        kubectl apply -f kubernetes/namespaces/
+        kubectl apply -f kubernetes/deployments/
+        kubectl apply -f kubernetes/services/
+        kubectl apply -f kubernetes/ingress/
+      
+        kubectl set image deployment/app app=ghcr.io/${{ github.repository }}/app:${{ github.sha }} -n tmc-cloud
+        kubectl rollout status deployment/app -n tmc-cloud

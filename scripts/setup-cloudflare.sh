@@ -5,38 +5,15 @@
 # Author: Based on project documentation
 # Version: 2.0
 
-set -e  # Exit on any error
+source "$(dirname "$0")/common.sh"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+set -e  # Exit on any error
 
 # Configuration
 CLOUDFLARED_CONFIG_DIR="/etc/cloudflared"
 TUNNEL_CONFIG_FILE="$CLOUDFLARED_CONFIG_DIR/config.yml"
 LOG_FILE="$HOME/on-premises-cloud/logs/cloudflare-setup.log"
 TUNNEL_NAME="on-premises-k8s"
-
-# Logging functions
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}" | tee -a "$LOG_FILE"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARNING] $1${NC}" | tee -a "$LOG_FILE"
-}
-
-error() {
-    echo -e "${RED}[ERROR] $1${NC}" | tee -a "$LOG_FILE"
-    exit 1
-}
-
-info() {
-    echo -e "${BLUE}[INFO] $1${NC}" | tee -a "$LOG_FILE"
-}
 
 # Check prerequisites
 check_prerequisites() {

@@ -1,0 +1,49 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+  
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+  
+    - name: Run linting
+      run: |
+        echo "Running linting checks..."
+        # Add your linting commands here
+  
+    - name: Run tests
+      run: |
+        echo "Running tests..."
+        # Add your test commands here
+  
+    - name: Build Docker images
+      run: |
+        docker build -t tmc-cloud-test:${{ github.sha }} .
+  
+    - name: Security scan
+      run: |
+        echo "Running security scans..."
+        # Add security scanning tools here
+
+  validate-kubernetes:
+    runs-on: self-hosted
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+  
+    - name: Validate Kubernetes manifests
+      run: |
+        echo "Validating Kubernetes manifests..."
+        for file in kubernetes/**/*.yaml; do
+          kubectl --dry-run=client apply -f "$file" || echo "Invalid manifest: $file"
+        done

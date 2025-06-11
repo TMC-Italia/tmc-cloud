@@ -1,0 +1,36 @@
+# Production Environment Configuration
+environment: production
+
+cluster:
+  name: tmc-cloud-prod
+  namespace: tmc-cloud
+
+resources:
+  limits:
+    cpu: "4"
+    memory: "8Gi"
+  requests:
+    cpu: "1"
+    memory: "2Gi"
+
+replicas:
+  min: 2
+  max: 10
+
+storage:
+  size: "100Gi"
+  class: "local-storage"
+
+monitoring:
+  enabled: true
+  retention: "30d"
+
+backup:
+  enabled: true
+  schedule: "0 1 * * *"
+  retention: "30d"
+
+security:
+  tls: true
+  rbac: true
+  networkPolicies: true

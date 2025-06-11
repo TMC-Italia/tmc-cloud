@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tmc-cloud
+  labels:
+    name: tmc-cloud
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    name: monitoring
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup
+  labels:
+    name: backup
