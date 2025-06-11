@@ -420,6 +420,134 @@ The setup scripts incorporate several security best practices by default:
 - **Artifact Storage**: Build artifacts and test results
 - **Integration**: Seamless integration with GitHub ecosystem
 
+## Troubleshooting & Useful Commands
+
+This section lists common commands and Makefile targets useful for operating, monitoring, and troubleshooting your TMC-Cloud environment.
+
+### Makefile Shortcuts
+
+The `Makefile` in the root of the repository provides convenient shortcuts for many common operations. Run `make help` to see all available targets and their descriptions.
+
+Here are a few examples:
+
+-   `make system-health`: Displays system uptime, disk usage, and memory usage.
+-   `make k8s-cluster-info`: Shows Kubernetes cluster information and version.
+-   `make k8s-all-pods`: Lists all pods across all namespaces.
+-   `make k8s-logs POD=<pod_name> NS=<namespace>`: Tails logs from a specific pod.
+    (e.g., `make k8s-logs POD=my-app-pod-12345 NS=production CONTAINER=my-app-container`)
+-   `make docker-info`: Provides an overview of Docker containers, images, and disk usage.
+-   `make tailscale-status`: Checks the status of the Tailscale VPN connection.
+-   `make cloudflare-status CLOUDFLARE_TUNNEL_NAME=<your_tunnel_name>`: Checks the status of your Cloudflare Tunnel.
+
+### Networking
+
+-   **Display IP addresses and network interface info:**
+    ```bash
+    ip addr show  # or ip a
+    hostname -I   # Shows all IP addresses of the host
+    ```
+    (Makefile: `make network-interfaces`)
+
+-   **Show listening sockets (check open ports):**
+    ```bash
+    sudo ss -tulnp
+    ```
+    (Makefile: `make network-ports`)
+
+-   **Check basic connectivity:**
+    ```bash
+    ping <host_or_ip>
+    ```
+    (Makefile: `make network-ping TARGET_HOST=<host_or_ip>`)
+
+-   **Query DNS:** (`dig` is generally more versatile than `nslookup`)
+    ```bash
+    dig <domain_name>
+    nslookup <domain_name>
+    ```
+    (Makefile: `make network-dns-lookup TARGET_HOST=<domain_name>`)
+
+-   **Trace network path:**
+    ```bash
+    traceroute <host_or_ip>
+    ```
+
+-   **Monitor network traffic in real-time:** (May require installation: `sudo apt install iftop nload`)
+    ```bash
+    sudo iftop # For detailed per-connection bandwidth usage
+    nload      # For overall interface traffic graphs
+    ```
+
+### Kubernetes (`kubectl`)
+
+Remember to configure your `kubectl` context correctly if you are managing multiple clusters. For this project, `setup-master.sh` configures `kubectl` for the user running the script.
+
+-   **Cluster Inspection:**
+    -   `kubectl cluster-info` (Makefile: `make k8s-cluster-info`)
+    -   `kubectl version --short` (Included in `make k8s-cluster-info`)
+    -   `kubectl get nodes -o wide` (Makefile: `make k8s-nodes`)
+    -   `kubectl get namespaces`
+    -   `kubectl top nodes` (Requires metrics-server to be installed in the cluster) (Makefile: `make k8s-top-nodes`)
+
+-   **Workload Inspection:**
+    -   `kubectl get pods -A -o wide` (List all pods in all namespaces) (Makefile: `make k8s-all-pods`)
+    -   `kubectl get pods -n <namespace> -o wide` (List pods in a specific namespace) (Makefile: `make k8s-ns-pods NS=<namespace>`)
+    -   `kubectl describe pod <pod-name> -n <namespace>` (Detailed information about a pod)
+    -   `kubectl logs -f <pod-name> -n <namespace> [-c <container-name>]` (Tail logs from a pod; `-c` if multiple containers) (Makefile: `make k8s-logs POD=... NS=... CONTAINER=...`)
+    -   `kubectl exec -it <pod-name> -n <namespace> -- /bin/sh` (or `/bin/bash` if available) (Open a shell into a pod) (Makefile: `make k8s-shell POD=... NS=... CONTAINER=...`)
+    -   `kubectl top pods -n <namespace>` (Resource usage for pods in a namespace; requires metrics-server) (Makefile: `make k8s-top-pods NS=...`)
+    -   `kubectl get deployments -A` (or `statefulsets`, `daemonsets`, `jobs`, `cronjobs`)
+    -   `kubectl describe deployment <deployment-name> -n <namespace>`
+
+-   **Service & Network Inspection:**
+    -   `kubectl get services -A -o wide` (Makefile: `make k8s-services`)
+    -   `kubectl get services -n <namespace> -o wide` (Makefile: `make k8s-ns-services NS=...`)
+    -   `kubectl describe service <service-name> -n <namespace>`
+    -   `kubectl port-forward service/<service-name> <local-port>:<service-port> -n <namespace>` (Access a service locally) (Makefile: `make k8s-port-forward SVC=... NS=... LOCAL_PORT=... REMOTE_PORT=...`)
+    -   `kubectl get networkpolicies -A` (List all network policies)
+    -   `kubectl get ingress -A` (List all ingress resources)
+    -   `kubectl get endpointslices -n <namespace>` (Inspect service endpoints)
+
+-   **Events:**
+    -   `kubectl get events -n <namespace> --sort-by=.metadata.creationTimestamp` (View events, useful for diagnosing issues) (Makefile: `make k8s-events NS=...`)
+
+### Docker
+
+These commands are useful if you are interacting with Docker directly on a node (e.g., for self-hosted runners or other Dockerized services outside Kubernetes).
+
+-   `docker ps -a`: List all containers (running and stopped). (Part of `make docker-info`)
+-   `docker images`: List all Docker images. (Part of `make docker-info`)
+-   `docker logs -f <container-id-or-name>`: Tail logs from a specific container. (Makefile: `make docker-logs CONTAINER=...`)
+-   `docker exec -it <container-id-or-name> /bin/bash` (or `/bin/sh`): Open a shell into a running container. (Makefile: `make docker-shell CONTAINER=...`)
+-   `docker stats`: Display a live stream of container resource usage statistics. (Makefile: `make docker-stats`)
+-   `docker system df`: Show Docker disk usage. (Part of `make docker-info`)
+
+### System & Infrastructure Monitoring
+
+-   **Basic System Vitals:**
+    ```bash
+    df -h  # Disk free space
+    free -m # Memory usage
+    uptime # System uptime and load averages
+    ```
+    (Combined in `make system-health`)
+
+-   **Interactive Process Viewer:**
+    ```bash
+    htop # (May require sudo apt install htop)
+    top
+    ```
+
+-   **Service Status & Logs:**
+    ```bash
+    systemctl status <service-name> # e.g., kubelet, docker, tailscaled, cloudflared
+    journalctl -u <service-name> -f --since "10 min ago" # Tail logs for a service
+    ```
+
+**Tool Installation Note:**
+Some tools mentioned here, like `dig` (part of `dnsutils`), `htop`, `iftop`, or `nload`, might not be installed by default on all systems. You can typically install them using your system's package manager, for example:
+`sudo apt update && sudo apt install dnsutils htop iftop nload`
+
 ## License
 
 This project is proprietary to the company and intended for internal use only.
