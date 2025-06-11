@@ -12,12 +12,23 @@ set -e  # Exit on any error
 # Configuration
 CLOUDFLARED_CONFIG_DIR="/etc/cloudflared"
 TUNNEL_CONFIG_FILE="$CLOUDFLARED_CONFIG_DIR/config.yml"
-LOG_FILE="$HOME/on-premises-cloud/logs/cloudflare-setup.log"
-TUNNEL_NAME="on-premises-k8s"
+LOG_FILE="$HOME/on-premises-cloud/logs/cloudflare-setup.log" # Assuming common.sh or user creates ~/on-premises-cloud/logs
+
+DEFAULT_TUNNEL_NAME="on-premises-k8s"
+TUNNEL_NAME="" # Will be set by user input in check_prerequisites
 
 # Check prerequisites
 check_prerequisites() {
     log "Checking prerequisites..."
+
+    # Prompt for Tunnel Name
+    read -r -p "Enter a name for your Cloudflare Tunnel [${DEFAULT_TUNNEL_NAME}]: " USER_TUNNEL_NAME
+    TUNNEL_NAME="${USER_TUNNEL_NAME:-$DEFAULT_TUNNEL_NAME}"
+    if [[ ! "$TUNNEL_NAME" =~ ^[a-zA-Z0-9-]+$ ]]; then
+        error "Invalid Tunnel Name. Use alphanumeric characters and hyphens only."
+        # exit 1 # Or handle error appropriately
+    fi
+    info "Using Tunnel Name: $TUNNEL_NAME"
     
     # Check if running with sudo privileges
     if ! sudo -n true 2>/dev/null; then
@@ -73,7 +84,8 @@ authenticate_cloudflare() {
     
     # Check if already authenticated
     if [ -f "$HOME/.cloudflared/cert.pem" ]; then
-        warn "Already authenticated with Cloudflare"
+        warn "Already authenticated with Cloudflare (cert.pem found)."
+        info "For fully headless setup in the future, ensure cert.pem is pre-placed in ~/.cloudflared/ and this login step will be skipped."
         return 0
     fi
     
@@ -116,45 +128,55 @@ configure_tunnel() {
     # Create configuration directory
     sudo mkdir -p "$CLOUDFLARED_CONFIG_DIR"
     
-    # Create tunnel configuration
-    cat > /tmp/cloudflared-config.yml <<EOF
-tunnel: $TUNNEL_ID
-credentials-file: /etc/cloudflared/$TUNNEL_ID.json
+    # Create tunnel configuration content
+    # Using placeholders \${TUNNEL_ID_PLACEHOLDER} and \${DOMAIN_PLACEHOLDER} to be replaced by sed
+    # This avoids issues with shell expansion within the heredoc if $TUNNEL_ID or $DOMAIN contained special characters.
+    local TUNNEL_CONFIG_CONTENT
+    TUNNEL_CONFIG_CONTENT=$(cat <<EOF
+# config.yml
+# Tunnel ID will be substituted by the script.
+# Credentials file path will be substituted by the script.
+tunnel: \${TUNNEL_ID_PLACEHOLDER}
+credentials-file: /etc/cloudflared/\${TUNNEL_ID_PLACEHOLDER}.json
 
 ingress:
-  # GitLab
-  - hostname: gitlab.${DOMAIN:-example.com}
-    service: http://192.168.1.101:30080
-    originRequest:
-      noTLSVerify: true
-  
-  # Grafana Monitoring
-  - hostname: grafana.${DOMAIN:-example.com}
-    service: http://192.168.1.100:30300
-    originRequest:
-      noTLSVerify: true
-  
-  # Kubernetes Dashboard
-  - hostname: k8s.${DOMAIN:-example.com}
-    service: https://192.168.1.100:6443
-    originRequest:
-      noTLSVerify: true
-  
-  # Prometheus
-  - hostname: prometheus.${DOMAIN:-example.com}
-    service: http://192.168.1.100:30900
-    originRequest:
-      noTLSVerify: true
-  
-  # Default catch-all (required)
+  # Example: Expose a service running on http://localhost:8000
+  # - hostname: myapp.\${DOMAIN_PLACEHOLDER}
+  #   service: http://localhost:8000
+  #
+  # --- IMPORTANT ---
+  # 1. Add your services here by uncommenting and modifying the example or adding new entries.
+  # 2. Ensure your origin services use VALID TLS CERTIFICATES if they are HTTPS.
+  #    cloudflared will attempt to verify them by default.
+  # 3. For HTTP origins, cloudflared provides TLS termination at the Cloudflare edge.
+  # 4. If you MUST use self-signed certificates for a specific HTTPS origin AND understand the risk,
+  #    you can add 'originRequest:'
+  #                '  noTLSVerify: true'
+  #    under that specific service entry. This is NOT recommended for production.
+  # ---
+  # Default catch-all rule (required to prevent Cloudflare from serving a generic error page).
+  # This should be the last rule in the ingress list.
   - service: http_status:404
 
-# Optional: Enable metrics
-metrics: 0.0.0.0:8080
+# Cloudflared configuration runs from /etc/cloudflared/ directory by default when run as a service.
+# Log file location is typically managed by systemd (e.g., journalctl -u cloudflared).
+# Autoupdates for cloudflared daemon are usually managed by the system package manager (apt).
+metrics: localhost:8081 # Changed from 0.0.0.0:8080 to localhost:8081 for security and to avoid port conflicts.
 EOF
+)
     
-    # Move configuration to system directory
-    sudo mv /tmp/cloudflared-config.yml "$TUNNEL_CONFIG_FILE"
+    # Replace placeholders
+    TUNNEL_CONFIG_CONTENT="${TUNNEL_CONFIG_CONTENT//\\${TUNNEL_ID_PLACEHOLDER}/$TUNNEL_ID}"
+    # If DOMAIN is not set, use "example.com" as a placeholder in the config comments
+    TUNNEL_CONFIG_CONTENT="${TUNNEL_CONFIG_CONTENT//\\${DOMAIN_PLACEHOLDER}/${DOMAIN:-example.com}}"
+
+    # Write configuration to system directory
+    echo "$TUNNEL_CONFIG_CONTENT" | sudo tee "$TUNNEL_CONFIG_FILE" > /dev/null
+
+    warn "SECURITY WARNING: 'noTLSVerify: true' has been REMOVED from the default configuration examples."
+    warn "Cloudflared will now VERIFY TLS certificates for your origin HTTPS services by default."
+    info "Ensure your internal services use valid, trusted TLS certificates if they are HTTPS, or serve them over HTTP if TLS is handled at the Cloudflare edge."
+    info "Edit $TUNNEL_CONFIG_FILE to add your services and manage TLS verification settings (noTLSVerify) per service if absolutely necessary and risks are understood."
     
     # Copy tunnel credentials
     sudo cp "$HOME/.cloudflared/$TUNNEL_ID.json" "$CLOUDFLARED_CONFIG_DIR/"
@@ -163,34 +185,22 @@ EOF
     sudo chown root:root "$CLOUDFLARED_CONFIG_DIR"/*
     sudo chmod 600 "$CLOUDFLARED_CONFIG_DIR"/*
     
-    info "Tunnel configuration created ✓"
+    info "Tunnel configuration created at $TUNNEL_CONFIG_FILE ✓"
 }
 
-# Setup DNS routes
+# Setup DNS routes (now instructional)
 setup_dns_routes() {
-    log "Setting up DNS routes..."
-    
+    log "Setting up DNS routes (Instructional)..."
+
+    info "DNS routes need to be configured MANUALLY for each hostname you define in $TUNNEL_CONFIG_FILE."
+    info "Once you have added hostnames to your $TUNNEL_CONFIG_FILE (e.g., myapp.${DOMAIN:-yourdomain.com}),"
+    info "you can create the DNS record for it using a command like this:"
+    info "  cloudflared tunnel route dns $TUNNEL_NAME myapp.${DOMAIN:-yourdomain.com}"
+    warn "This script will NOT automatically create DNS routes anymore due to the dynamic nature of ingress configuration."
+    info "Please add DNS routes manually for each service you expose via the tunnel."
     if [ -z "$DOMAIN" ]; then
-        warn "DOMAIN not set. Skipping automatic DNS setup."
-        info "Manual DNS setup required. Use these commands:"
-        echo "  cloudflared tunnel route dns $TUNNEL_NAME gitlab.yourdomain.com"
-        echo "  cloudflared tunnel route dns $TUNNEL_NAME grafana.yourdomain.com"
-        echo "  cloudflared tunnel route dns $TUNNEL_NAME k8s.yourdomain.com"
-        echo "  cloudflared tunnel route dns $TUNNEL_NAME prometheus.yourdomain.com"
-        return 0
+        warn "Remember, the DOMAIN variable was not set, so ensure you use your correct domain when creating DNS routes."
     fi
-    
-    # Create DNS routes
-    local services=("gitlab" "grafana" "k8s" "prometheus")
-    
-    for service in "${services[@]}"; do
-        local hostname="${service}.${DOMAIN}"
-        if cloudflared tunnel route dns "$TUNNEL_NAME" "$hostname"; then
-            info "DNS route created for $hostname ✓"
-        else
-            warn "Failed to create DNS route for $hostname"
-        fi
-    done
 }
 
 # Install as system service
@@ -220,18 +230,23 @@ create_management_scripts() {
     mkdir -p "$HOME/on-premises-cloud/tools/cloudflare"
     
     # Status script
+    # TUNNEL_NAME is a global variable in the main script, set during check_prerequisites
     cat > "$HOME/on-premises-cloud/tools/cloudflare/status.sh" <<EOF
 #!/bin/bash
-echo "=== Cloudflare Tunnel Status ==="
+# This script uses the Tunnel Name configured during 'setup-cloudflare.sh'.
+# If you've created tunnels with different names, you might need to adjust this.
+TUNNEL_NAME_FOR_SCRIPT="${TUNNEL_NAME}"
+
+echo "=== Cloudflare Tunnel Status for: \$TUNNEL_NAME_FOR_SCRIPT ==="
 sudo systemctl status cloudflared --no-pager
 echo
-echo "=== Tunnel List ==="
+echo "=== Tunnel List (all tunnels on this account) ==="
 cloudflared tunnel list
 echo
-echo "=== Tunnel Info ==="
-cloudflared tunnel info $TUNNEL_NAME
+echo "=== Detailed Info for: \$TUNNEL_NAME_FOR_SCRIPT ==="
+cloudflared tunnel info "\$TUNNEL_NAME_FOR_SCRIPT"
 echo
-echo "=== Service Logs (last 20 lines) ==="
+echo "=== Service Logs (last 20 lines for cloudflared.service) ==="
 sudo journalctl -u cloudflared -n 20 --no-pager
 EOF
     
@@ -273,13 +288,10 @@ setup_oauth_policies() {
     echo
     echo "2. Navigate to Access > Applications"
     echo
-    echo "3. Create applications for each service:"
-    echo "   - GitLab: gitlab.${DOMAIN:-yourdomain.com}"
-    echo "   - Grafana: grafana.${DOMAIN:-yourdomain.com}"
-    echo "   - Kubernetes: k8s.${DOMAIN:-yourdomain.com}"
-    echo "   - Prometheus: prometheus.${DOMAIN:-yourdomain.com}"
+    echo "3. Create applications for each service you have configured in $TUNNEL_CONFIG_FILE."
+    echo "   For example, if you configured 'myapp.${DOMAIN:-yourdomain.com}', create an application for that hostname."
     echo
-    echo "4. Configure access policies (e.g., email domain, specific users)"
+    echo "4. Configure access policies for each application (e.g., based on email domain, specific users, etc.)."
     echo
     echo "5. Enable session duration and other security settings"
     echo
@@ -297,19 +309,12 @@ show_connection_info() {
     echo
     
     info "Tunnel Name: $TUNNEL_NAME"
-    info "Tunnel ID: $TUNNEL_ID"
-    info "Configuration: $TUNNEL_CONFIG_FILE"
+    info "Tunnel ID: ${TUNNEL_ID:-Not Created Yet}" # TUNNEL_ID is set in create_tunnel
+    info "Configuration file: $TUNNEL_CONFIG_FILE"
     
     echo
-    info "Configured Services:"
-    if [ -n "$DOMAIN" ]; then
-        echo "  GitLab: https://gitlab.$DOMAIN"
-        echo "  Grafana: https://grafana.$DOMAIN"
-        echo "  Kubernetes: https://k8s.$DOMAIN"
-        echo "  Prometheus: https://prometheus.$DOMAIN"
-    else
-        echo "  Configure DNS manually for your domain"
-    fi
+    info "Configured Services: (Please refer to your $TUNNEL_CONFIG_FILE)"
+    info "Remember to manually add DNS routes for each hostname you configure."
     
     echo
     info "Management commands:"
@@ -319,14 +324,16 @@ show_connection_info() {
     
     echo
     warn "IMPORTANT NOTES:"
-    echo "  1. Configure OAuth policies in Cloudflare Zero Trust dashboard"
-    echo "  2. Services are exposed publicly - ensure proper authentication"
-    echo "  3. Monitor tunnel metrics at http://localhost:8080/metrics"
+    echo "  1. Configure OAuth access policies in Cloudflare Zero Trust for your exposed hostnames."
+    echo "  2. Ensure services defined in $TUNNEL_CONFIG_FILE are running and accessible from this machine."
+    echo "  3. Monitor tunnel metrics at http://localhost:8081/metrics (if enabled and default port used)."
     echo "  4. Check service logs: sudo journalctl -u cloudflared -f"
     
     echo
     info "Next steps:"
-    echo "  1. Configure OAuth access policies"
+    echo "  1. Edit $TUNNEL_CONFIG_FILE to define your ingress rules."
+    echo "  2. For each hostname in your config, create a DNS route: cloudflared tunnel route dns $TUNNEL_NAME <hostname>"
+    echo "  3. Configure OAuth access policies in Cloudflare Zero Trust dashboard for each application."
     echo "  2. Test external access to services"
     echo "  3. Set up monitoring and alerting"
     echo "  4. Configure SSL certificates if needed"

@@ -239,27 +239,57 @@ pre-commit run --all-files
 
 - **Subnet**: 192.168.1.0/24
 
-### Firewall Rules
+### Firewall Configuration
 
-- Port 6443: Kubernetes API Server
-- Port 2379-2380: etcd
-- Port 10250: Kubelet
-- Port 30000-32767: NodePort Services
-- Port 80/443: HTTP/HTTPS traffic
+Firewall rules are managed by **UFW (Uncomplicated Firewall)**, which is configured by the `scripts/setup/setup-environment.sh` script on each node. UFW is set with a default policy of denying incoming traffic and allowing outgoing. Specific rules are added to allow essential services for Kubernetes, SSH, and remote access tools as detailed in their respective setup scripts and the "Enhanced Security Measures" section. For specific port requirements for Tailscale and Cloudflare, see the "Remote Access" section below.
 
 ## Remote Access
 
-### Tailscale VPN
+Secure remote access to your cluster and services is crucial. This project provides setup scripts for Tailscale (for private VPN access) and Cloudflare Tunnels (for public exposure of services).
 
-- **Purpose**: Secure administrative access
-- **Features**: Mesh VPN, easy setup, reliable connectivity
-- **Use Case**: Administrator access to all nodes
+### Tailscale VPN Setup (`scripts/setup/setup-tailscale.sh`)
 
-### Cloudflare Tunnel
+- **Purpose**: Provides secure, private network access to your nodes for administration and internal service communication without exposing them directly to the internet.
+- **Features**: Zero-config mesh VPN, end-to-end encryption, identity-based access control.
+- **Use Case**: Administrator access to Kubernetes nodes, direct access to internal services not meant for public exposure.
 
-- **Purpose**: Public service exposure
-- **Features**: OAuth integration, subdomain routing
-- **Use Case**: External access to applications and monitoring
+**Key Enhancements & Setup Notes:**
+
+-   **Interactive Setup:** The `scripts/setup/setup-tailscale.sh` script is now more interactive:
+    -   **Authentication:** You'll be prompted to choose between interactive browser login or using a Tailscale auth key. Auth keys are recommended for headless servers or automated setups; remember to handle them securely (e.g., as ephemeral or pre-authorized keys).
+    -   **Advertised Subnets:** You can specify comma-separated subnets (e.g., `192.168.1.0/24`) that this node should advertise to your Tailscale network. Leave this empty if the node should not act as a subnet router.
+    -   **Device Hostname:** You can set a custom Tailscale device hostname, which defaults to `your-system-hostname-k8s`.
+-   **Firewall Integration (UFW):** Firewall rules for Tailscale are now managed using `ufw`, consistent with the base environment setup. The script allows traffic on the `tailscale0` interface and UDP port 41641 (for NAT traversal), ensuring Tailscale can operate effectively.
+-   **IP Forwarding:** If you choose to advertise subnets, IP forwarding will be enabled on the node. The script includes warnings about this and emphasizes the importance of securing access to these advertised routes using Tailscale ACLs.
+-   **Idempotency:** The script has been improved for better idempotency, particularly for `sysctl` settings related to IP forwarding.
+-   **Critical Security Note - ACLs:** After setting up Tailscale and especially if advertising routes, it is **CRITICAL** to configure Access Control Lists (ACLs) in your Tailscale admin console (`https://login.tailscale.com/admin/acls`). ACLs define which devices can connect to each other and which users/tags can access advertised subnets. **Do not skip this step** to maintain a secure private network.
+
+### Cloudflare Tunnel Setup (`scripts/setup/setup-cloudflare.sh`)
+
+- **Purpose**: Securely exposes your self-hosted services to the internet without needing to open firewall ports or have a static public IP.
+- **Features**: TLS encryption, DDoS protection, Web Application Firewall (WAF) capabilities (via Cloudflare dashboard), OAuth integration for access control.
+- **Use Case**: Public access to web applications, APIs, and services like Grafana or GitLab, often integrated with Cloudflare Access for authentication.
+
+**Key Enhancements & Setup Notes:**
+
+-   **Interactive Tunnel Name:** The `scripts/setup/setup-cloudflare.sh` script now prompts for a **Tunnel Name** (defaults to `on-premises-k8s`), allowing for more flexible naming.
+-   **IMPORTANT Security Update - TLS Verification:**
+    -   The script **no longer sets `noTLSVerify: true` by default** in the Cloudflare Tunnel configuration file (`/etc/cloudflared/config.yml`).
+    -   This is a critical security improvement: `cloudflared` will now **VERIFY TLS certificates** for your origin HTTPS services.
+    -   **Action Required:**
+        -   If your internal services are exposed via HTTPS, they **must present valid TLS certificates** (e.g., from an internal Certificate Authority or Let's Encrypt).
+        -   If your origin service is HTTP (e.g., `http://localhost:8000`), `cloudflared` will handle TLS termination at the Cloudflare edge, and no origin certificate is needed for that specific service.
+        -   If you absolutely must use self-signed certificates for an internal HTTPS service and fully understand the security risks (e.g., disabling protection against man-in-the-middle attacks between `cloudflared` and your origin), you can manually add `originRequest: { noTLSVerify: true }` to that *specific service's* ingress rule in `/etc/cloudflared/config.yml`. This is **strongly discouraged for production environments.**
+-   **Manual Ingress Configuration:**
+    -   The generated `/etc/cloudflared/config.yml` is now a **minimal template**. You **MUST edit this file** to add your specific ingress rules, defining which local services to expose under which public hostnames.
+    -   The script provides comments and an example within the generated `config.yml` to guide you. The `~/on-premises-cloud/tools/cloudflare/update-config.sh` script can be used to safely edit this file.
+-   **Manual DNS Routing:**
+    -   Consistent with manual ingress configuration, DNS routing is **no longer automated** by the script.
+    -   After configuring your hostnames in `config.yml`, you must manually create DNS records for each using the command: `cloudflared tunnel route dns <YOUR_TUNNEL_NAME> <your.hostname.com>`. The setup script will remind you of this.
+-   **Metrics Endpoint:** The `cloudflared` metrics endpoint is now configured on `localhost:8081` (previously `0.0.0.0:8080`) for improved security, limiting direct exposure.
+-   **Authentication & OAuth:**
+    -   Authentication to Cloudflare (to link `cloudflared` to your account) still typically uses `cloudflared tunnel login` (browser-based). For headless server setups, the `cert.pem` file can be pre-placed in `~/.cloudflared/` to skip this interactive step.
+    -   Remember to manually configure **OAuth (or other Access policies)** for your exposed applications in the Cloudflare Zero Trust dashboard to secure them. The script provides guidance on where to do this.
 
 ## Security Considerations
 
