@@ -22,12 +22,15 @@ check_prerequisites() {
     log "Checking prerequisites..."
 
     # Prompt for Tunnel Name
-    read -r -p "Enter a name for your Cloudflare Tunnel [${DEFAULT_TUNNEL_NAME}]: " USER_TUNNEL_NAME
-    TUNNEL_NAME="${USER_TUNNEL_NAME:-$DEFAULT_TUNNEL_NAME}"
-    if [[ ! "$TUNNEL_NAME" =~ ^[a-zA-Z0-9-]+$ ]]; then
-        error "Invalid Tunnel Name. Use alphanumeric characters and hyphens only."
-        # exit 1 # Or handle error appropriately
-    fi
+    while true; do
+        read -r -p "Enter a name for your Cloudflare Tunnel [${DEFAULT_TUNNEL_NAME}]: " USER_TUNNEL_NAME
+        TUNNEL_NAME="${USER_TUNNEL_NAME:-$DEFAULT_TUNNEL_NAME}"
+        if [[ "$TUNNEL_NAME" =~ ^[a-zA-Z0-9-]+$ ]]; then
+            break
+        else
+            error "Invalid Tunnel Name. Use alphanumeric characters and hyphens only."
+        fi
+    done
     info "Using Tunnel Name: $TUNNEL_NAME"
     
     # Check if running with sudo privileges
