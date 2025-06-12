@@ -76,53 +76,67 @@ git clone https://github.com/TMC-Italia/tmc-cloud
 cd tmc-cloud
 
 # Make scripts executable
-chmod +x scripts/*.sh scripts/maintenance/*.sh
+# Adjust paths according to the new structure in scripts/
+chmod +x scripts/setup/*.sh scripts/deployment/*.sh scripts/maintenance/*.sh scripts/utils/*.sh
 
 # Run initial setup
-./scripts/setup-environment.sh
+./scripts/setup/setup-environment.sh # (Prepares each node, now includes UFW, Fail2ban, auto-updates, and hostname guidance)
 ```
 
 ### 2. Network Configuration
 
 ```bash
 # Configure network on each node
-./scripts/configure-network.sh
+./scripts/setup/configure-network.sh
 ```
 
 ### 3. Kubernetes Cluster Setup
 
 ```bash
 # On master node
-./scripts/setup-master.sh
+./scripts/setup/setup-master.sh # (Initializes K8s master, now applies default network policies)
 
 # On worker nodes
-./scripts/setup-worker.sh
+./scripts/setup/setup-worker.sh # (Joins worker to cluster, now with enhanced security guidance)
 ```
+
+## Multi-Node Deployment Notes
+
+Deploying this system across multiple laptops (nodes) requires careful attention to a few key areas:
+
+-   **Unique Hostnames:** Crucial for a multi-node Kubernetes cluster, each laptop/node *must* have a unique hostname. The `scripts/setup/setup-environment.sh` script will warn you if a generic hostname (like "ubuntu" or "localhost") is detected and provide instructions to change it (e.g., using `sudo hostnamectl set-hostname my-master`). Remember to update `/etc/hosts` accordingly and reboot if you change the hostname.
+
+-   **Script Execution Order:**
+    1.  Run `scripts/setup/setup-environment.sh` on *all* laptops that will be part of the cluster. This script prepares the common base environment.
+    2.  Run `scripts/setup/setup-master.sh` on the *one* laptop designated as the Kubernetes master node.
+    3.  Run `scripts/setup/setup-worker.sh` on *each* of the laptops designated as worker nodes. You will need the join command output by `setup-master.sh`.
+
+-   **Configuration & IP Addresses:** The setup scripts, particularly `setup-master.sh`, contain some hardcoded IP addresses (e.g., `192.168.1.100` for the master node's API server). If your network configuration or chosen master IP differs, you'll need to adjust these values within the scripts themselves. Look for comments within the scripts for guidance on where these are set. For more advanced setups, consider parameterizing these values using environment variables or a separate configuration file. The `network-config.yaml` template created by `setup-environment.sh` should also be reviewed and aligned with your network plan.
 
 ### 4. Deploy Core Services
 
 ```bash
 # Deploy monitoring stack
-./scripts/deploy-monitoring.sh
+./scripts/deployment/deploy-monitoring.sh
 
 # Setup backup system
-./scripts/setup-backup.sh
+./scripts/setup/setup-backup.sh
 
 # Setup GitHub Actions runner
-./scripts/setup-github-runner.sh
+./scripts/setup-github-runner.sh # Note: This script was not part of the recent reorganization tasks. Its location and content should be verified.
 ```
 
 ### 5. Configure Remote Access
 
 ```bash
 # Configure Tailscale for secure VPN access
-./scripts/setup-tailscale.sh
+./scripts/setup/setup-tailscale.sh
 
 # Configure Cloudflare for public access
-./scripts/setup-cloudflare.sh yourdomain.com
+./scripts/setup/setup-cloudflare.sh yourdomain.com
 
 # Or run without domain (manual DNS setup)
-./scripts/setup-cloudflare.sh
+./scripts/setup/setup-cloudflare.sh
 ```
 
 ### 6. Maintenance & Health Checks
@@ -130,6 +144,86 @@ chmod +x scripts/*.sh scripts/maintenance/*.sh
 ```bash
 # Run system health check
 ./scripts/maintenance/system-health-check.sh
+```
+
+## Repository Structure
+
+The repository is organized into several key directories to maintain clarity and separation of concerns:
+
+-   **`configs/`**: Contains configuration files.
+    -   `configs/environments/`: Holds environment-specific configurations like `dev.example.yml` and `prod.example.yml`.
+-   **`docker/`**: Contains Docker-related files.
+    -   `docker/images/`: Houses Dockerfiles and related scripts (e.g., `entrypoint.sh`) for building container images, organized by image name.
+    -   `docker-compose.yml`: The main Docker Compose file for local development and service orchestration.
+-   **`kubernetes/`**: Contains Kubernetes manifest files.
+    -   `kubernetes/namespaces/`: YAML files defining Kubernetes namespaces.
+    -   `kubernetes/deployments/`: YAML files for application and service deployments. This includes actual deployment files like `github-runner-deployment.yaml` and `nextcloud-deployment.yaml`.
+    -   `kubernetes/configmaps/`: YAML files for ConfigMaps.
+    -   `kubernetes/services/`: YAML files defining Kubernetes services (Note: Directory to be populated).
+    -   `kubernetes/ingress/`: YAML files for Ingress controllers and rules (Note: Directory to be populated).
+    -   `kubernetes/storage/`: YAML files related to persistent storage, like PersistentVolumeClaims or StorageClass definitions, and placeholder files like `.gitkeep`.
+    -   `kubernetes/helm-charts/`: Contains Helm charts for deploying applications (currently holds a `.gitkeep`).
+-   **`scripts/`**: Contains shell scripts for various automation tasks.
+    -   `scripts/setup/`: Scripts related to initial setup and configuration of the environment and nodes (e.g., `setup-environment.sh`, `configure-network.sh`, `setup-master.sh`, `setup-backup.sh`).
+    -   `scripts/deployment/`: Scripts for deploying applications or services (e.g., `deploy-monitoring.sh`).
+    -   `scripts/maintenance/`: Scripts for system maintenance tasks (e.g., `system-health-check.sh`).
+    -   `scripts/utils/`: Utility scripts that might be used by other scripts (e.g., `common.sh`).
+
+## Example Files
+
+To help users get started and understand the configuration and scripting patterns, the following example files have been provided:
+
+-   **`configs/environments/dev.example.yml`**: An example configuration file tailored for a development environment. It includes settings like debug mode, local database connections, and mock service endpoints.
+-   **`configs/environments/prod.example.yml`**: An example configuration file for a production environment. It emphasizes security, robustness, and the use of production-level services and secrets management.
+-   **`scripts/deployment/deploy-app.example.sh`**: An example shell script outlining the steps for deploying an application. It covers typical deployment phases like pre-deployment checks, image updates, rollout status checks, and post-deployment tasks.
+-   **`scripts/setup/setup-backup.example.sh`**: An example shell script demonstrating how to set up and perform backups. It includes placeholders for database backups, application data backups, transfer to remote storage, and cleanup.
+
+These example files should be copied and modified according to your specific requirements. For instance, rename `dev.example.yml` to `dev.yml` and populate it with your actual development settings.
+
+## Pre-commit Checks
+
+This repository uses pre-commit hooks to ensure code quality and consistency before commits are made. This helps catch common issues early.
+
+### Setup
+
+To use the pre-commit hooks, you need to have `pre-commit` installed.
+
+1.  **Install pre-commit**:
+    If you don't have it installed, you can install it using pip:
+    ```bash
+    pip install pre-commit
+    ```
+
+2.  **Install the git hooks**:
+    Navigate to the root of the repository and run:
+    ```bash
+    pre-commit install
+    ```
+    This will set up the pre-commit script to run automatically before each commit.
+
+### Usage
+
+Once installed, pre-commit will run automatically when you `git commit`. It will check the staged files against the configured hooks (see `.pre-commit-config.yaml`).
+
+-   If any checks fail, the commit will be aborted. You'll see an error message indicating which hook failed and why.
+-   Fix the issues reported by the hooks (some hooks like `trailing-whitespace` or `end-of-file-fixer` might fix them automatically).
+-   After fixing, `git add` the modified files and try committing again.
+
+### Available Hooks
+
+The following hooks are configured:
+
+-   **YAML Linter (`yamllint`)**: Checks YAML files for syntax errors and style issues. Configuration can be customized in `.yamllint.yaml`.
+-   **Shell Script Linter (`shellcheck`)**: Performs static analysis on shell scripts to find potential bugs and improve style.
+-   **Trailing Whitespace**: Trims trailing whitespace from files.
+-   **End of File Fixer**: Ensures files end with a single newline.
+-   **Check YAML/JSON**: Basic syntax checks for YAML and JSON files.
+-   **Check Added Large Files**: Prevents accidental commits of large files.
+-   **Mixed Line Ending**: Ensures consistent line endings (LF).
+
+You can manually run all pre-commit hooks on all files at any time with:
+```bash
+pre-commit run --all-files
 ```
 
 ## Network Configuration
@@ -145,27 +239,57 @@ chmod +x scripts/*.sh scripts/maintenance/*.sh
 
 - **Subnet**: 192.168.1.0/24
 
-### Firewall Rules
+### Firewall Configuration
 
-- Port 6443: Kubernetes API Server
-- Port 2379-2380: etcd
-- Port 10250: Kubelet
-- Port 30000-32767: NodePort Services
-- Port 80/443: HTTP/HTTPS traffic
+Firewall rules are managed by **UFW (Uncomplicated Firewall)**, which is configured by the `scripts/setup/setup-environment.sh` script on each node. UFW is set with a default policy of denying incoming traffic and allowing outgoing. Specific rules are added to allow essential services for Kubernetes, SSH, and remote access tools as detailed in their respective setup scripts and the "Enhanced Security Measures" section. For specific port requirements for Tailscale and Cloudflare, see the "Remote Access" section below.
 
 ## Remote Access
 
-### Tailscale VPN
+Secure remote access to your cluster and services is crucial. This project provides setup scripts for Tailscale (for private VPN access) and Cloudflare Tunnels (for public exposure of services).
 
-- **Purpose**: Secure administrative access
-- **Features**: Mesh VPN, easy setup, reliable connectivity
-- **Use Case**: Administrator access to all nodes
+### Tailscale VPN Setup (`scripts/setup/setup-tailscale.sh`)
 
-### Cloudflare Tunnel
+- **Purpose**: Provides secure, private network access to your nodes for administration and internal service communication without exposing them directly to the internet.
+- **Features**: Zero-config mesh VPN, end-to-end encryption, identity-based access control.
+- **Use Case**: Administrator access to Kubernetes nodes, direct access to internal services not meant for public exposure.
 
-- **Purpose**: Public service exposure
-- **Features**: OAuth integration, subdomain routing
-- **Use Case**: External access to applications and monitoring
+**Key Enhancements & Setup Notes:**
+
+-   **Interactive Setup:** The `scripts/setup/setup-tailscale.sh` script is now more interactive:
+    -   **Authentication:** You'll be prompted to choose between interactive browser login or using a Tailscale auth key. Auth keys are recommended for headless servers or automated setups; remember to handle them securely (e.g., as ephemeral or pre-authorized keys).
+    -   **Advertised Subnets:** You can specify comma-separated subnets (e.g., `192.168.1.0/24`) that this node should advertise to your Tailscale network. Leave this empty if the node should not act as a subnet router.
+    -   **Device Hostname:** You can set a custom Tailscale device hostname, which defaults to `your-system-hostname-k8s`.
+-   **Firewall Integration (UFW):** Firewall rules for Tailscale are now managed using `ufw`, consistent with the base environment setup. The script allows traffic on the `tailscale0` interface and UDP port 41641 (for NAT traversal), ensuring Tailscale can operate effectively.
+-   **IP Forwarding:** If you choose to advertise subnets, IP forwarding will be enabled on the node. The script includes warnings about this and emphasizes the importance of securing access to these advertised routes using Tailscale ACLs.
+-   **Idempotency:** The script has been improved for better idempotency, particularly for `sysctl` settings related to IP forwarding.
+-   **Critical Security Note - ACLs:** After setting up Tailscale and especially if advertising routes, it is **CRITICAL** to configure Access Control Lists (ACLs) in your Tailscale admin console (`https://login.tailscale.com/admin/acls`). ACLs define which devices can connect to each other and which users/tags can access advertised subnets. **Do not skip this step** to maintain a secure private network.
+
+### Cloudflare Tunnel Setup (`scripts/setup/setup-cloudflare.sh`)
+
+- **Purpose**: Securely exposes your self-hosted services to the internet without needing to open firewall ports or have a static public IP.
+- **Features**: TLS encryption, DDoS protection, Web Application Firewall (WAF) capabilities (via Cloudflare dashboard), OAuth integration for access control.
+- **Use Case**: Public access to web applications, APIs, and services like Grafana or GitLab, often integrated with Cloudflare Access for authentication.
+
+**Key Enhancements & Setup Notes:**
+
+-   **Interactive Tunnel Name:** The `scripts/setup/setup-cloudflare.sh` script now prompts for a **Tunnel Name** (defaults to `on-premises-k8s`), allowing for more flexible naming.
+-   **IMPORTANT Security Update - TLS Verification:**
+    -   The script **no longer sets `noTLSVerify: true` by default** in the Cloudflare Tunnel configuration file (`/etc/cloudflared/config.yml`).
+    -   This is a critical security improvement: `cloudflared` will now **VERIFY TLS certificates** for your origin HTTPS services.
+    -   **Action Required:**
+        -   If your internal services are exposed via HTTPS, they **must present valid TLS certificates** (e.g., from an internal Certificate Authority or Let's Encrypt).
+        -   If your origin service is HTTP (e.g., `http://localhost:8000`), `cloudflared` will handle TLS termination at the Cloudflare edge, and no origin certificate is needed for that specific service.
+        -   If you absolutely must use self-signed certificates for an internal HTTPS service and fully understand the security risks (e.g., disabling protection against man-in-the-middle attacks between `cloudflared` and your origin), you can manually add `originRequest: { noTLSVerify: true }` to that *specific service's* ingress rule in `/etc/cloudflared/config.yml`. This is **strongly discouraged for production environments.**
+-   **Manual Ingress Configuration:**
+    -   The generated `/etc/cloudflared/config.yml` is now a **minimal template**. You **MUST edit this file** to add your specific ingress rules, defining which local services to expose under which public hostnames.
+    -   The script provides comments and an example within the generated `config.yml` to guide you. The `~/on-premises-cloud/tools/cloudflare/update-config.sh` script can be used to safely edit this file.
+-   **Manual DNS Routing:**
+    -   Consistent with manual ingress configuration, DNS routing is **no longer automated** by the script.
+    -   After configuring your hostnames in `config.yml`, you must manually create DNS records for each using the command: `cloudflared tunnel route dns <YOUR_TUNNEL_NAME> <your.hostname.com>`. The setup script will remind you of this.
+-   **Metrics Endpoint:** The `cloudflared` metrics endpoint is now configured on `localhost:8081` (previously `0.0.0.0:8080`) for improved security, limiting direct exposure.
+-   **Authentication & OAuth:**
+    -   Authentication to Cloudflare (to link `cloudflared` to your account) still typically uses `cloudflared tunnel login` (browser-based). For headless server setups, the `cert.pem` file can be pre-placed in `~/.cloudflared/` to skip this interactive step.
+    -   Remember to manually configure **OAuth (or other Access policies)** for your exposed applications in the Cloudflare Zero Trust dashboard to secure them. The script provides guidance on where to do this.
 
 ## Security Considerations
 
@@ -175,6 +299,32 @@ chmod +x scripts/*.sh scripts/maintenance/*.sh
 - **Backup Encryption**: Encrypted offsite backups
 - **Certificate Management**: cert-manager for automatic SSL certificates
 - **GitHub Secrets**: Secure storage of CI/CD secrets and tokens
+
+### Enhanced Security Measures
+
+The setup scripts incorporate several security best practices by default:
+
+-   **Firewall (UFW):** The `setup-environment.sh` script configures UFW (Uncomplicated Firewall) on each node. It establishes a default policy of denying all incoming traffic and allowing all outgoing traffic. Specific rules are added to allow essential services, including:
+    -   SSH (port 22/tcp)
+    -   Kubernetes components: API server (6443/tcp), etcd (2379-2380/tcp), Kubelet (10250/tcp), NodePort services (30000-32767/tcp).
+    -   CNI communication (Calico): BGP (179/tcp), IP-in-IP (protocol `ipip`).
+    -   HTTP/S traffic (ports 80/tcp, 443/tcp).
+
+-   **Intrusion Prevention (Fail2ban):** `Fail2ban` is installed and configured by `setup-environment.sh`. It actively monitors SSH logs and temporarily bans IP addresses that exhibit malicious behavior, such as excessive incorrect password attempts, thereby mitigating brute-force attack risks.
+
+-   **Automatic Security Updates:** The `unattended-upgrades` package is configured via `setup-environment.sh` to automatically download and install security patches daily. This helps protect the system against known vulnerabilities with minimal manual intervention. To prevent unintended disruptions to the Kubernetes cluster, packages like `kubeadm`, `kubelet`, and `kubectl` are blacklisted from automatic upgrades.
+
+-   **SSH Hardening Guidance:** While the scripts set up basic SSH access and Fail2ban, users are strongly encouraged to manually enhance SSH security further:
+    *   **Disable password authentication:** Enforce key-based authentication for stronger protection against password guessing.
+    *   **Disable direct root login:** Prevent root users from logging in directly via SSH.
+    *   These changes can be made by editing `/etc/ssh/sshd_config` and restarting the `sshd` service (e.g., `sudo systemctl restart sshd`). The `setup-environment.sh` script provides a reminder for these manual steps.
+
+-   **Kubernetes Network Policies:** The `setup-master.sh` script now applies default network policies to the `default` namespace using Calico CNI. These policies institute a "default deny" for all ingress and egress traffic for pods in that namespace. Specific rules are then added to:
+    *   Allow DNS resolution (to `kube-dns` pods in `kube-system`).
+    *   Allow basic internet egress from pods.
+    *   **Important:** Users *must* create explicit `NetworkPolicy` resources to allow any other required communication between their application pods or to/from external services. Guidance is also provided to consider similar policies for other namespaces like `kube-system`, applied cautiously.
+
+-   **Secure Token Handling:** The `kubeadm join` token, generated on the master node and used to add worker nodes, is critical for cluster security. The `setup-master.sh` and `setup-worker.sh` scripts now include explicit warnings to handle this token securely during its transfer and use, as it grants significant privileges.
 
 ## Services & Components
 
@@ -269,6 +419,134 @@ chmod +x scripts/*.sh scripts/maintenance/*.sh
 - **Secrets Management**: Secure handling of credentials
 - **Artifact Storage**: Build artifacts and test results
 - **Integration**: Seamless integration with GitHub ecosystem
+
+## Troubleshooting & Useful Commands
+
+This section lists common commands and Makefile targets useful for operating, monitoring, and troubleshooting your TMC-Cloud environment.
+
+### Makefile Shortcuts
+
+The `Makefile` in the root of the repository provides convenient shortcuts for many common operations. Run `make help` to see all available targets and their descriptions.
+
+Here are a few examples:
+
+-   `make system-health`: Displays system uptime, disk usage, and memory usage.
+-   `make k8s-cluster-info`: Shows Kubernetes cluster information and version.
+-   `make k8s-all-pods`: Lists all pods across all namespaces.
+-   `make k8s-logs POD=<pod_name> NS=<namespace>`: Tails logs from a specific pod.
+    (e.g., `make k8s-logs POD=my-app-pod-12345 NS=production CONTAINER=my-app-container`)
+-   `make docker-info`: Provides an overview of Docker containers, images, and disk usage.
+-   `make tailscale-status`: Checks the status of the Tailscale VPN connection.
+-   `make cloudflare-status CLOUDFLARE_TUNNEL_NAME=<your_tunnel_name>`: Checks the status of your Cloudflare Tunnel.
+
+### Networking
+
+-   **Display IP addresses and network interface info:**
+    ```bash
+    ip addr show  # or ip a
+    hostname -I   # Shows all IP addresses of the host
+    ```
+    (Makefile: `make network-interfaces`)
+
+-   **Show listening sockets (check open ports):**
+    ```bash
+    sudo ss -tulnp
+    ```
+    (Makefile: `make network-ports`)
+
+-   **Check basic connectivity:**
+    ```bash
+    ping <host_or_ip>
+    ```
+    (Makefile: `make network-ping TARGET_HOST=<host_or_ip>`)
+
+-   **Query DNS:** (`dig` is generally more versatile than `nslookup`)
+    ```bash
+    dig <domain_name>
+    nslookup <domain_name>
+    ```
+    (Makefile: `make network-dns-lookup TARGET_HOST=<domain_name>`)
+
+-   **Trace network path:**
+    ```bash
+    traceroute <host_or_ip>
+    ```
+
+-   **Monitor network traffic in real-time:** (May require installation: `sudo apt install iftop nload`)
+    ```bash
+    sudo iftop # For detailed per-connection bandwidth usage
+    nload      # For overall interface traffic graphs
+    ```
+
+### Kubernetes (`kubectl`)
+
+Remember to configure your `kubectl` context correctly if you are managing multiple clusters. For this project, `setup-master.sh` configures `kubectl` for the user running the script.
+
+-   **Cluster Inspection:**
+    -   `kubectl cluster-info` (Makefile: `make k8s-cluster-info`)
+    -   `kubectl version --short` (Included in `make k8s-cluster-info`)
+    -   `kubectl get nodes -o wide` (Makefile: `make k8s-nodes`)
+    -   `kubectl get namespaces`
+    -   `kubectl top nodes` (Requires metrics-server to be installed in the cluster) (Makefile: `make k8s-top-nodes`)
+
+-   **Workload Inspection:**
+    -   `kubectl get pods -A -o wide` (List all pods in all namespaces) (Makefile: `make k8s-all-pods`)
+    -   `kubectl get pods -n <namespace> -o wide` (List pods in a specific namespace) (Makefile: `make k8s-ns-pods NS=<namespace>`)
+    -   `kubectl describe pod <pod-name> -n <namespace>` (Detailed information about a pod)
+    -   `kubectl logs -f <pod-name> -n <namespace> [-c <container-name>]` (Tail logs from a pod; `-c` if multiple containers) (Makefile: `make k8s-logs POD=... NS=... CONTAINER=...`)
+    -   `kubectl exec -it <pod-name> -n <namespace> -- /bin/sh` (or `/bin/bash` if available) (Open a shell into a pod) (Makefile: `make k8s-shell POD=... NS=... CONTAINER=...`)
+    -   `kubectl top pods -n <namespace>` (Resource usage for pods in a namespace; requires metrics-server) (Makefile: `make k8s-top-pods NS=...`)
+    -   `kubectl get deployments -A` (or `statefulsets`, `daemonsets`, `jobs`, `cronjobs`)
+    -   `kubectl describe deployment <deployment-name> -n <namespace>`
+
+-   **Service & Network Inspection:**
+    -   `kubectl get services -A -o wide` (Makefile: `make k8s-services`)
+    -   `kubectl get services -n <namespace> -o wide` (Makefile: `make k8s-ns-services NS=...`)
+    -   `kubectl describe service <service-name> -n <namespace>`
+    -   `kubectl port-forward service/<service-name> <local-port>:<service-port> -n <namespace>` (Access a service locally) (Makefile: `make k8s-port-forward SVC=... NS=... LOCAL_PORT=... REMOTE_PORT=...`)
+    -   `kubectl get networkpolicies -A` (List all network policies)
+    -   `kubectl get ingress -A` (List all ingress resources)
+    -   `kubectl get endpointslices -n <namespace>` (Inspect service endpoints)
+
+-   **Events:**
+    -   `kubectl get events -n <namespace> --sort-by=.metadata.creationTimestamp` (View events, useful for diagnosing issues) (Makefile: `make k8s-events NS=...`)
+
+### Docker
+
+These commands are useful if you are interacting with Docker directly on a node (e.g., for self-hosted runners or other Dockerized services outside Kubernetes).
+
+-   `docker ps -a`: List all containers (running and stopped). (Part of `make docker-info`)
+-   `docker images`: List all Docker images. (Part of `make docker-info`)
+-   `docker logs -f <container-id-or-name>`: Tail logs from a specific container. (Makefile: `make docker-logs CONTAINER=...`)
+-   `docker exec -it <container-id-or-name> /bin/bash` (or `/bin/sh`): Open a shell into a running container. (Makefile: `make docker-shell CONTAINER=...`)
+-   `docker stats`: Display a live stream of container resource usage statistics. (Makefile: `make docker-stats`)
+-   `docker system df`: Show Docker disk usage. (Part of `make docker-info`)
+
+### System & Infrastructure Monitoring
+
+-   **Basic System Vitals:**
+    ```bash
+    df -h  # Disk free space
+    free -m # Memory usage
+    uptime # System uptime and load averages
+    ```
+    (Combined in `make system-health`)
+
+-   **Interactive Process Viewer:**
+    ```bash
+    htop # (May require sudo apt install htop)
+    top
+    ```
+
+-   **Service Status & Logs:**
+    ```bash
+    systemctl status <service-name> # e.g., kubelet, docker, tailscaled, cloudflared
+    journalctl -u <service-name> -f --since "10 min ago" # Tail logs for a service
+    ```
+
+**Tool Installation Note:**
+Some tools mentioned here, like `dig` (part of `dnsutils`), `htop`, `iftop`, or `nload`, might not be installed by default on all systems. You can typically install them using your system's package manager, for example:
+`sudo apt update && sudo apt install dnsutils htop iftop nload`
 
 ## License
 

@@ -1,0 +1,65 @@
+# .yamllint.yaml
+# Configuration for yamllint: https://yamllint.readthedocs.io/en/stable/configuration.html
+
+extends: default
+
+yaml-files:
+  - '*.yaml'
+  - '*.yml'
+  # - '.yamllint' # You can even lint the yamllint config itself
+
+rules:
+  # Default rules are generally good.
+  # Below are examples of how you might customize.
+
+  # Line length
+  line-length:
+    max: 120
+    level: warning # 'warning' or 'error'
+
+  # Indentation
+  indentation:
+    spaces: 2 # Number of spaces for indentation
+    indent-sequences: consistent # Whether to indent sequences with the same number of spaces
+    check-multi-line-strings: false # Usually not needed for most styles
+
+  # Braces/Brackets
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+    min-spaces-inside-empty: 0
+    max-spaces-inside-empty: 0
+
+  # Comments
+  # comments:
+  #   require-starting-space: true
+  #   min-spaces-from-content: 1
+  #   level: warning
+
+  # Disable certain checks if necessary (use sparingly)
+  # Example: If you have a specific reason to disable the document-start check
+  # document-start: disable
+
+  # Key ordering (if you want to enforce alphabetical order, though often not practical)
+  # key-ordering: enable
+
+  # Truthy values (e.g., for Ansible, use 'yes'/'no', 'true'/'false', 'on'/'off')
+  # truthy:
+  #   allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+  #   check-keys:
+  #     - enabled
+  #     - active
+  #     - present
+  #     - available
+
+# Ignore specific files or directories
+# ignore: |
+#   /some_directory_to_ignore/
+#   specific_file.yaml
+#   vendor/
+#   node_modules/

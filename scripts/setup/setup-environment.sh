@@ -1,5 +1,15 @@
 #!/bin/bash
 
+# CONFIGURATION FOR MULTI-LAPTOP DEPLOYMENT:
+# This script is designed to be run on each laptop in your cluster.
+# For values that might differ per node (e.g., specific IP addresses if not DHCP, roles):
+# 1. Consider using environment variables to override defaults if scripts are adapted for this.
+# 2. For more complex setups, you might use a simple config file (e.g., ~/tmc-cloud/configs/node-specific.env)
+#    and source it, e.g.: source ~/tmc-cloud/configs/node-specific.env
+# 3. The network configuration (IPs, CIDRs) is referenced from templates created by this script
+#    (e.g., ~/tmc-cloud/configs/network/network-config.yaml). Ensure these are consistent with your plan.
+# Scripts like setup-master.sh and setup-worker.sh will determine the node's role.
+
 # On-Premises Cloud Infrastructure - Environment Setup Script
 # This script prepares the system for Kubernetes cluster deployment with GitHub Actions CI/CD
 # Author: Based on project documentation by Silvio Mario Pastori, Flavio Renzi, Marco Selva, Carmine Scacco
@@ -60,6 +70,7 @@ update_system() {
 # Install essential packages
 install_essentials() {
     log "Installing essential packages..."
+    # Note: iptables-persistent removed, ufw will be used.
     sudo apt install -y \\
         curl \\
         wget \\
@@ -77,7 +88,9 @@ install_essentials() {
         unzip \\
         tree \\
         rsync \\
-        iptables-persistent \\
+        ufw \\
+        fail2ban \\
+        unattended-upgrades \\
         build-essential \\
         python3 \\
         python3-pip \\
@@ -157,6 +170,21 @@ install_github_cli() {
 configure_system() {
     log "Configuring system settings..."
 
+    # Hostname check and guidance for multi-node setups
+    local current_hostname=$(hostname)
+    if [[ "$current_hostname" == "ubuntu" || "$current_hostname" == "localhost" || "$current_hostname" == "linux" || "$current_hostname" == "debian" ]]; then
+        warn "Your current hostname is generic: '$current_hostname'."
+        warn "For a multi-node Kubernetes cluster, each node MUST have a unique and persistent hostname."
+        info "It is highly recommended to set a unique hostname (e.g., k8s-master, k8s-worker1) before proceeding with cluster setup."
+        info "You can set it using: sudo hostnamectl set-hostname <new-hostname>"
+        info "After setting the hostname, update /etc/hosts to reflect the new hostname for 127.0.1.1 (if such an entry exists)."
+        info "A reboot is typically required for all services to recognize the new hostname."
+        info "This script will continue, but ensure hostnames are unique across all your laptops before initializing the cluster."
+        # Optionally, you could add a read -p "Press [Enter] to acknowledge and continue..." here
+    else
+        info "Current hostname: '$current_hostname'. Ensure this is unique within your intended cluster."
+    fi
+
     # Disable swap (required for Kubernetes)
     sudo swapoff -a
     sudo sed -i '/ swap / s/^\\(.*\\)$/#\\1/g' /etc/fstab
@@ -188,58 +216,210 @@ EOF
     info "System configuration completed"
 }
 
-# Setup firewall rules
-setup_firewall() {
-    log "Configuring firewall rules..."
+# Setup UFW firewall rules
+setup_ufw_firewall() {
+    log "Configuring UFW firewall rules..."
 
-    # Reset iptables rules
-    sudo iptables -F
-    sudo iptables -X
-    sudo iptables -t nat -F
-    sudo iptables -t nat -X
-    sudo iptables -t mangle -F
-    sudo iptables -t mangle -X
+    # Disable iptables-persistent if it's active, as we are using UFW
+    if sudo systemctl is-active --quiet netfilter-persistent; then
+        log "Disabling and stopping netfilter-persistent service..."
+        sudo systemctl stop netfilter-persistent
+        sudo systemctl disable netfilter-persistent
+        # Remove old rules if they exist
+        sudo rm -f /etc/iptables/rules.v4
+        sudo rm -f /etc/iptables/rules.v6
+    fi
+    # An alternative to removing files is `sudo update-rc.d netfilter-persistent remove`
 
-    # Allow loopback
-    sudo iptables -A INPUT -i lo -j ACCEPT
-    sudo iptables -A OUTPUT -o lo -j ACCEPT
+    # Ensure UFW is installed (should be from install_essentials)
+    if ! command -v ufw &> /dev/null; then
+        error "UFW command not found. Please ensure it's installed."
+        return 1
+    fi
 
-    # Allow established connections
-    sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    # Reset UFW to default state to ensure a clean setup (optional, can be disruptive)
+    # Consider if this is too aggressive. For now, we'll add rules without a hard reset.
+    # sudo ufw --force reset
 
-    # Allow SSH
-    sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+    # Set default policies
+    log "Setting UFW default policies: deny incoming, allow outgoing, deny routed."
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
+    sudo ufw default deny routed # Important for security if not acting as a router
 
-    # Kubernetes ports
-    sudo iptables -A INPUT -p tcp --dport 6443 -j ACCEPT      # API Server
-    sudo iptables -A INPUT -p tcp --dport 2379:2380 -j ACCEPT # etcd
-    sudo iptables -A INPUT -p tcp --dport 10250 -j ACCEPT     # Kubelet
-    sudo iptables -A INPUT -p tcp --dport 10251 -j ACCEPT     # kube-scheduler
-    sudo iptables -A INPUT -p tcp --dport 10252 -j ACCEPT     # kube-controller-manager
-    sudo iptables -A INPUT -p tcp --dport 30000:32767 -j ACCEPT # NodePort Services
+    # Allow essential traffic
+    log "Allowing SSH (port 22)..."
+    sudo ufw allow ssh # Equivalent to allow 22/tcp
 
-    # HTTP/HTTPS
-    sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT
-    sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+    log "Allowing HTTP (port 80) and HTTPS (port 443)..."
+    sudo ufw allow http  # 80/tcp
+    sudo ufw allow https # 443/tcp
 
-    # GitHub Actions Runner communication
-    sudo iptables -A OUTPUT -p tcp --dport 443 -j ACCEPT      # HTTPS for GitHub API
-    sudo iptables -A OUTPUT -p tcp --dport 80 -j ACCEPT       # HTTP fallback
+    # Allow Kubernetes specific ports
+    # Master node specific ports (can be applied to all nodes for simplicity in many setups)
+    log "Allowing Kubernetes API server (6443/tcp) and etcd (2379:2380/tcp)..."
+    sudo ufw allow 6443/tcp comment 'Kubernetes API Server'
+    sudo ufw allow 2379:2380/tcp comment 'etcd client and peer'
 
-    # Allow internal cluster communication
-    sudo iptables -A INPUT -s 192.168.1.0/24 -j ACCEPT
-    sudo iptables -A INPUT -s 10.244.0.0/16 -j ACCEPT        # Pod network
+    # Worker/common Kubernetes ports
+    log "Allowing Kubelet (10250/tcp) and NodePort services (30000:32767/tcp)..."
+    sudo ufw allow 10250/tcp comment 'Kubelet API'
+    sudo ufw allow 30000:32767/tcp comment 'Kubernetes NodePort Services'
 
-    # Default policies
-    sudo iptables -P INPUT DROP
-    sudo iptables -P FORWARD ACCEPT
-    sudo iptables -P OUTPUT ACCEPT
+    # Allow Calico CNI ports (adjust if using a different CNI)
+    # BGP for Calico
+    log "Allowing Calico BGP (179/tcp)..."
+    sudo ufw allow 179/tcp comment 'Calico BGP'
+    # IP-in-IP (protocol 4). UFW needs modules loaded for this.
+    # Ensure /etc/default/ufw has IPT_MODULES containing at least 'ip_tables ip6_tables nf_nat nf_conntrack ip_set ipip'
+    # This rule might require manual check/setup of /etc/default/ufw.
+    log "Attempting to load 'ipip' kernel module for Calico."
+    sudo modprobe ipip
+    log "Allowing Calico IP-in-IP (protocol ipip). Ensure 'ipip' module is loaded and configured in /etc/default/ufw for persistence if not already."
+    sudo ufw allow proto ipip comment 'Calico IP-in-IP'
+    # VXLAN for Calico (if used instead of IP-in-IP)
+    # sudo ufw allow 4789/udp comment 'Calico VXLAN'
+    # Typha for Calico (if used)
+    # sudo ufw allow 5473/tcp comment 'Calico Typha'
+    log "Note: Calico CNI requirements can vary. Review Calico documentation for specific port needs for your setup (e.g., VXLAN, Typha)."
 
-    # Save rules
-    sudo netfilter-persistent save
+    # Allow Flannel CNI ports (example, commented out as Calico is primary for this project)
+    # log "Allowing Flannel VXLAN (8285/udp, 8472/udp)..."
+    # sudo ufw allow 8285/udp comment 'Flannel VXLAN (control)'
+    # sudo ufw allow 8472/udp comment 'Flannel VXLAN (data)'
 
-    info "Firewall rules configured"
+    # Allow internal cluster communication (replace with your actual internal LAN/VPN subnet)
+    # This is crucial for inter-node communication.
+    # Example: if your nodes are on 192.168.1.0/24
+    INTERNAL_LAN_SUBNET="192.168.1.0/24" # Make this configurable or detect if possible
+    log "Allowing all traffic from internal LAN subnet ${INTERNAL_LAN_SUBNET}..."
+    sudo ufw allow from "${INTERNAL_LAN_SUBNET}" comment 'Internal LAN traffic'
+    # Consider also allowing traffic from Pod and Service CIDRs if necessary, though often handled by CNI/kube-proxy rules directly in iptables.
+    # Example: POD_CIDR="10.244.0.0/16"; sudo ufw allow from "${POD_CIDR}" comment 'Pod Network'
+    # Example: SERVICE_CIDR="10.96.0.0/12"; sudo ufw allow from "${SERVICE_CIDR}" comment 'Service Network'
+
+    # Enable UFW logging
+    log "Enabling UFW logging..."
+    sudo ufw logging on # Options: low, medium, high, full
+
+    # Enable UFW
+    # The --force option is used to enable UFW without prompting if done via script.
+    log "Enabling UFW..."
+    yes | sudo ufw enable || true # `yes |` handles the y/n prompt. `|| true` prevents exit if ufw is already enabled.
+    # A more robust way: sudo ufw status | grep -q inactive && yes | sudo ufw enable
+
+    sudo ufw status verbose
+    info "UFW firewall configured and enabled."
 }
+
+# Configure automatic system updates
+configure_automatic_updates() {
+    log "Configuring automatic updates (unattended-upgrades)..."
+
+    # Ensure the package is installed
+    if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
+        warn "unattended-upgrades package is not installed. Skipping configuration."
+        return 1
+    fi
+
+    # Create/overwrite the auto-upgrades configuration file
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/20auto-upgrades
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+    log "Created /etc/apt/apt.conf.d/20auto-upgrades"
+
+    # Create/overwrite a more detailed unattended-upgrades configuration
+    # This is a basic configuration. Users might want to customize it further,
+    # especially regarding automatic reboots or specific package handling.
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/50unattended-upgrades
+// Automatically upgrade packages from these origin patterns
+Unattended-Upgrade::Allowed-Origins {
+    // Ubuntu main and security updates
+    "\${distro_id}:\${distro_codename}";
+    "\${distro_id}:\${distro_codename}-security";
+    // Extended Security Maintenance (ESM) - if applicable
+    // "\${distro_id}ESMApps:\${distro_codename}-apps-security";
+    // "\${distro_id}ESMInfra:\${distro_codename}-infra-security";
+    // Backports (optional, use with caution)
+    // "\${distro_id}:\${distro_codename}-backports";
+};
+
+// List of packages to not update
+Unattended-Upgrade::Package-Blacklist {
+    // "vim";
+    // "libc6";
+    // "docker-ce"; "docker-ce-cli"; "containerd.io"; # If managing Docker versions manually
+    "kubeadm"; "kubelet"; "kubectl"; # Kubernetes components are often version-pinned
+};
+
+// Automatically reboot_with_delay if required, and if the user is not logged in.
+// Set to "false" if you don't want automatic reboots.
+Unattended-Upgrade::Automatic-Reboot "false";
+// Unattended-Upgrade::Automatic-Reboot-Time "02:00"; // If Automatic-Reboot is true
+
+// Remove unused kernel packages
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Remove unused dependencies
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Send email notification (requires mailx or similar and configured MTA)
+// Unattended-Upgrade::Mail "your-email@example.com";
+// Unattended-Upgrade::MailOnlyOnError "true";
+EOF
+    log "Created /etc/apt/apt.conf.d/50unattended-upgrades with basic settings."
+
+    # Reconfigure to apply settings (optional, files should be picked up automatically)
+    # sudo dpkg-reconfigure -plow unattended-upgrades
+
+    info "Automatic updates configured. System will check for updates daily."
+    info "Consider customizing /etc/apt/apt.conf.d/50unattended-upgrades for reboot behavior and package blacklists."
+}
+
+# Configure Fail2ban for SSH
+configure_fail2ban() {
+    log "Configuring Fail2ban for SSH protection..."
+
+    # Ensure Fail2ban is installed
+    if ! command -v fail2ban-client &> /dev/null; then
+        error "Fail2ban command not found. Please ensure it's installed."
+        return 1
+    fi
+
+    # Create jail.local for SSH (or use jail.d)
+    # Using jail.d is generally preferred for modularity
+    sudo mkdir -p /etc/fail2ban/jail.d/
+    cat <<EOF | sudo tee /etc/fail2ban/jail.d/sshd.local
+[sshd]
+enabled = true
+port = ssh    ; also supports custom ports e.g. 2222 or "ssh, 2222"
+# filter = sshd  ; default filter, usually correct
+logpath = %(sshd_log)s ; default log path, usually /var/log/auth.log
+# backend = %(sshd_backend)s ; auto-detection, systemd is common
+maxretry = 3
+bantime = 1h   ; 1 hour. Use '1d' for a day, '1w' for a week. -1 for permanent (not recommended for SSH)
+findtime = 10m ; 10 minutes window for retries
+
+# Optional: Whitelist your IP addresses (space separated)
+# ignoreip = 127.0.0.1/8 ::1 YOUR_STATIC_IP_1 YOUR_STATIC_IP_2
+EOF
+    log "Created /etc/fail2ban/jail.d/sshd.local for SSH protection."
+
+    # Restart and enable Fail2ban service
+    log "Restarting and enabling Fail2ban service..."
+    sudo systemctl restart fail2ban
+    sudo systemctl enable fail2ban
+
+    # Check status (optional)
+    # sudo fail2ban-client status
+    # sudo fail2ban-client status sshd
+
+    info "Fail2ban configured for SSH."
+}
+
 
 # Create directory structure
 create_directories() {
@@ -603,7 +783,9 @@ main() {
     install_helm
     install_github_cli
     configure_system
-    setup_firewall
+    setup_ufw_firewall # Replaced setup_firewall
+    configure_automatic_updates # New
+    configure_fail2ban # New
     create_directories
     install_additional_tools
     setup_ssh
@@ -616,7 +798,16 @@ main() {
     log "Environment setup completed successfully!"
     echo "===="
     echo
-    warn "IMPORTANT: Please reboot the system to ensure all changes take effect."
+    info "SECURITY RECOMMENDATIONS:"
+    info "  - For enhanced SSH security, consider manually editing /etc/ssh/sshd_config to:"
+    info "    - Set 'PasswordAuthentication no' (use SSH keys only)"
+    info "    - Set 'PermitRootLogin no'"
+    info "    - Change the default SSH port (ensure UFW is updated if you do)"
+    info "    Then restart the SSH service (e.g., sudo systemctl restart sshd)."
+    info "  - Regularly review UFW rules (sudo ufw status verbose) and Fail2ban logs (/var/log/fail2ban.log)."
+    info "  - Keep the system updated and monitor logs for security events."
+    echo
+    warn "IMPORTANT: Please reboot the system to ensure all changes take effect (especially kernel module loading, sysctl, and some package initializations)."
     warn "After reboot, you can proceed with cluster initialization."
     echo
     info "Next steps:"

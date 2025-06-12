@@ -1,0 +1,70 @@
+# .pre-commit-config.yaml
+# Pre-commit configuration for ensuring code quality and consistency.
+
+# For a full list of hooks, see https://pre-commit.com/hooks.html
+# To update hooks to the latest version: pre-commit autoupdate
+
+repos:
+-   repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1 # Use a specific, recent tag
+    hooks:
+    -   id: yamllint
+        name: YAML Lint
+        description: Check YAML files for syntax validity and formatting issues.
+        entry: yamllint
+        language: python
+        types: [yaml]
+        args: ['--config-file', '.yamllint.yaml'] # Optional: if you have a custom yamllint config
+
+-   repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0 # Use a specific, recent tag
+    hooks:
+    -   id: shellcheck
+        name: ShellCheck
+        description: Static analysis tool for shell scripts.
+        entry: shellcheck
+        language: script # or system if shellcheck is globally installed
+        types: [shell]
+        args: ['--external-sources'] # Allow sourcing other files
+
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0 # Use a specific, recent tag
+    hooks:
+    -   id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        description: Trims trailing whitespace from files.
+        types: [text] # Applies to most text files
+        exclude: '\.md$' # Example: exclude markdown if you want to allow trailing whitespace for line breaks
+    -   id: end-of-file-fixer
+        name: Fix End of Files
+        description: Ensures files end with a newline and only a newline.
+        types: [text]
+    -   id: check-yaml
+        name: Check YAML
+        description: Checks YAML files for parseable syntax (basic check, complements yamllint).
+        types: [yaml]
+    -   id: check-json
+        name: Check JSON
+        description: Checks JSON files for parseable syntax.
+        types: [json]
+    -   id: check-added-large-files
+        name: Check for Added Large Files
+        description: Prevents committing large files.
+        args: ['--maxkb=2048'] # Max 2MB, adjust as needed
+    -   id: mixed-line-ending
+        name: Fix Mixed Line Endings
+        description: Replaces or checks mixed line endings (CRLF vs LF).
+        types: [text]
+        args: ['--fix=lf'] # Convert to LF
+
+# Optional: Add a .yamllint.yaml file in the root if you need to customize yamllint rules
+# Example .yamllint.yaml:
+# ---
+# extends: default
+# rules:
+#   line-length:
+#     max: 120
+#     level: warning
+#   document-start: disable
+#   # Add other custom rules here
+# ...
